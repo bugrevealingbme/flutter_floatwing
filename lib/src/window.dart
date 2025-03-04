@@ -228,6 +228,9 @@ class WindowConfig {
 
   bool? visible;
 
+  /// Use accessibility overlay type (requires Android 8.0+ and accessibility service enabled)
+  bool? useAccessibility;
+
   /// we need this for update, so must wihtout default value
   WindowConfig({
     this.id = "default",
@@ -247,6 +250,7 @@ class WindowConfig {
     this.focusable,
     this.immersion,
     this.visible,
+    this.useAccessibility,
   }) : assert(
             callback == null ||
                 PluginUtilities.getCallbackHandle(callback) != null,
@@ -281,6 +285,8 @@ class WindowConfig {
       immersion: map["immersion"],
 
       visible: map["visible"],
+
+      useAccessibility: map["useAccessibility"],
     );
   }
 
@@ -313,13 +319,15 @@ class WindowConfig {
 
     map["visible"] = visible;
 
+    map["useAccessibility"] = useAccessibility;
+
     return map;
   }
 
   // return a window frm config
-  Window to() {
+  Window to([String? id]) {
     // will lose window instance
-    return Window(id: this.id ?? "default", config: this);
+    return Window(id: id ?? this.id ?? "default", config: this);
   }
 
   Future<Window?> create({
