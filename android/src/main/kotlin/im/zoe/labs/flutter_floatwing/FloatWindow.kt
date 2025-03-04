@@ -220,59 +220,73 @@ class FloatWindow(
             return true
         }
 
-        // Context'in geçerli olup olmadığını kontrol et
+        // Context kontrolü
         if (service.applicationContext == null) {
             Log.e(TAG, "[window] Context is null, cannot start window")
             emit("error", "Cannot start window: Context is null")
             return false
         }
 
-        // useAccessibility true ise ve erişilebilirlik servisi etkin değilse, pencereyi açmayı reddet
+        // useAccessibility kontrolü
         if (config.useAccessibility == true) {
-            val accessibilityEnabled = isAccessibilityServiceEnabled()
-            if (!accessibilityEnabled) {
-                Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Accessibility service is not enabled")
-                emit("error", "Cannot start window: Accessibility service is not enabled")
+            // API seviyesi kontrolü
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                Log.e(TAG, "[window] Cannot use TYPE_ACCESSIBILITY_OVERLAY: Requires Android 8.0+")
+                emit("error", "Cannot start window: TYPE_ACCESSIBILITY_OVERLAY requires Android 8.0+")
+                return false
+            }
+
+            // Erişilebilirlik servisi etkin mi?
+            if (!isAccessibilityServiceEnabled()) {
+                Log.e(TAG, "[window] Accessibility service is not enabled")
+                emit("error", "Cannot start window: Accessibility service not enabled")
                 return false
             }
             
-            // TYPE_ACCESSIBILITY_OVERLAY için API düzeyi kontrolü
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-                Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Requires Android 8.0 (API 26) or higher")
-                emit("error", "Cannot start window: TYPE_ACCESSIBILITY_OVERLAY requires Android 8.0 or higher")
+            // Servis örneği var mı?
+            val accessibilityInstance = FloatwingAccessibilityService.getInstance()
+            if (accessibilityInstance == null) {
+                Log.e(TAG, "[window] Accessibility service instance not available")
+                emit("error", "Cannot start window: Accessibility service not running")
                 return false
             }
+            
+            // Accessibility window manager kullan
+            val accessibilityWM = FloatwingAccessibilityService.getWindowManager()
+            if (accessibilityWM == null) {
+                Log.e(TAG, "[window] Failed to get WindowManager from accessibility service")
+                emit("error", "Cannot start window: Failed to get WindowManager")
+                return false
+            }
+            
+            // WindowManager'ı güncelle
+            wm = accessibilityWM
+            accessibilityService = accessibilityInstance
+            
+            // Pencereyi servise ekle
+            accessibilityInstance.addWindow(this)
+            
+            // TYPE_ACCESSIBILITY_OVERLAY kullan
+            layoutParams.type = TYPE_ACCESSIBILITY_OVERLAY
         }
 
         _started = true
-        Log.d(TAG, "[window] start window: $key")
+        Log.d(TAG, "[window] Starting window: $key with type: ${layoutParams.type}")
 
         engine.lifecycleChannel.appIsResumed()
         emit("resumed")
         view.attachToFlutterEngine(engine)
         
         try {
-            // Erişilebilirlik servisi kullanıldığında, accessibilityService doğrudan kullanılmalı
-            val context = if (config.useAccessibility == true && accessibilityService != null) {
-                accessibilityService!!.baseContext
-            } else {
-                service.applicationContext
-            }
-            
-            if (context != null) {
-                wm.addView(view, layoutParams)
-                emit("started")
-                return true
-            } else {
-                Log.e(TAG, "[window] Context is null, cannot add view")
-                emit("error", "Cannot start window: Context is null")
-                _started = false
-                return false
-            }
+            // Window'u ekle
+            wm.addView(view, layoutParams)
+            FloatWindow.addActiveWindow(this)
+            emit("started")
+            return true
         } catch (e: Exception) {
             _started = false
-            Log.e(TAG, "[window] Failed to add view to window manager: ${e.message}")
-            emit("error", "Failed to start window: ${e.message}")
+            Log.e(TAG, "[window] Failed to add view: ${e.message}")
+            emit("error", "Failed to add view: ${e.message}")
             return false
         }
     }
@@ -734,27 +748,58 @@ class FloatWindow(
 
 
 class FloatwingAccessibilityService : AccessibilityService() {
-    private var floatWindow: FloatWindow? = null
+    companion object {
+        private const val TAG = "FloatwingAS"
+        private var instance: FloatwingAccessibilityService? = null
+        
+        fun getInstance(): FloatwingAccessibilityService? {
+            return instance
+        }
+        
+        fun getWindowManager(): WindowManager? {
+            return instance?.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        }
+    }
+    
+    private val floatWindows = mutableListOf<FloatWindow>()
     
     override fun onServiceConnected() {
         super.onServiceConnected()
-        // Servis bağlandığında ilgili tüm pencereleri bilgilendir
+        Log.d(TAG, "Accessibility service connected")
+        instance = this
+        
+        // Tüm bekleyen pencerelere bildir
         FloatWindow.getActiveWindows().forEach { window ->
             if (window.config.useAccessibility == true) {
-                window.startAccessibilityService(this)
+                addWindow(window)
             }
         }
     }
-
-    fun setFloatWindow(window: FloatWindow) {
-        this.floatWindow = window
+    
+    fun addWindow(window: FloatWindow) {
+        if (!floatWindows.contains(window)) {
+            floatWindows.add(window)
+            window.startAccessibilityService(this)
+            Log.d(TAG, "Window added to accessibility service: ${window.key}")
+        }
+    }
+    
+    fun removeWindow(window: FloatWindow) {
+        floatWindows.remove(window)
+        Log.d(TAG, "Window removed from accessibility service: ${window.key}")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        floatWindow?.onAccessibilityEvent(event)
+        floatWindows.forEach { it.onAccessibilityEvent(event) }
     }
 
     override fun onInterrupt() {
-        floatWindow?.onInterrupt()
+        floatWindows.forEach { it.onInterrupt() }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+        Log.d(TAG, "Accessibility service destroyed")
     }
 }
