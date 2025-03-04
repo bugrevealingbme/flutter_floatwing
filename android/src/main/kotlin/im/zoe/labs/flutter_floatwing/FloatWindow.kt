@@ -71,7 +71,7 @@ class FloatWindow(
     fun startAccessibilityService(service: AccessibilityService) {
         accessibilityService = service
         // Erişilebilirlik servisi başlatıldığında yapılacak işlemler
-        service.onServiceConnected()
+        // onServiceConnected() doğrudan çağrılamaz, bu yüzden kaldırıldı
     }
 
     // Erişilebilirlik servisini durdur
@@ -150,7 +150,8 @@ class FloatWindow(
             }
         }
         
-        accessibilityService?.addAccessibilityStateChangeListener(callback)
+        val accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        accessibilityManager.addAccessibilityStateChangeListener(callback)
         FloatWindow.updateAccessibilityState(isAccessibilityServiceEnabled())
     }
 
