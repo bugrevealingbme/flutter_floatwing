@@ -22,7 +22,7 @@ import io.flutter.plugin.common.PluginRegistry.Registrar
 import org.json.JSONObject
 import java.lang.Exception
 import android.accessibilityservice.AccessibilityServiceInfo
-import android.accessibilityservice.AccessibilityManager
+import android.view.accessibility.AccessibilityManager
 
 /** FlutterFloatwingPlugin */
 class FlutterFloatwingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginRegistry.ActivityResultListener {
