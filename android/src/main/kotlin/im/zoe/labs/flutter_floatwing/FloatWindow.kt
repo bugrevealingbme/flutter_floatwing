@@ -185,6 +185,13 @@ class FloatWindow(
             return true
         }
 
+        // Context'in geçerli olup olmadığını kontrol et
+        if (service.applicationContext == null) {
+            Log.e(TAG, "[window] Context is null, cannot start window")
+            emit("error", "Cannot start window: Context is null")
+            return false
+        }
+
         // useAccessibility true ise ve erişilebilirlik servisi etkin değilse, pencereyi açmayı reddet
         if (config.useAccessibility == true) {
             val accessibilityEnabled = isAccessibilityServiceEnabled()
@@ -210,9 +217,17 @@ class FloatWindow(
         view.attachToFlutterEngine(engine)
         
         try {
-            wm.addView(view, layoutParams)
-            emit("started")
-            return true
+            // Application context yerine activity context kullan
+            val context = service.applicationContext
+            if (context != null) {
+                wm.addView(view, layoutParams)
+                emit("started")
+                return true
+            } else {
+                Log.e(TAG, "[window] Context is null, cannot add view")
+                emit("error", "Cannot start window: Context is null")
+                return false
+            }
         } catch (e: Exception) {
             _started = false
             Log.e(TAG, "[window] Failed to add view to window manager: ${e.message}")
