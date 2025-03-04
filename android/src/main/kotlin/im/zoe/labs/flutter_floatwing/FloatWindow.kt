@@ -105,28 +105,17 @@ class FloatWindow(
             emit("accessibility_state_changed", enabled)
             
             if (enabled) {
-                // Use TYPE_ACCESSIBILITY_OVERLAY when accessibility service is enabled
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    update(Config().apply {
-                        type = TYPE_ACCESSIBILITY_OVERLAY
-                    })
-                }
+                // Erişilebilirlik etkinleştirildiğinde overlay tipini güncelleyelim
+                useAccessibilityOverlayIfAvailable()
             }
         }
         
         accessibilityCallback = callback
         accessibilityManager?.addAccessibilityStateChangeListener(callback)
         accessibilityEnabled = accessibilityManager?.isEnabled ?: false
-        
-        // Check if we can use accessibility overlay
-        if (accessibilityEnabled) {
-            // Use accessibility overlay type when available
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                update(Config().apply {
-                    type = TYPE_ACCESSIBILITY_OVERLAY
-                })
-            }
-        }
+
+        // Mevcut durumu hemen kontrol edelim    
+        useAccessibilityOverlayIfAvailable()
     }
 
     fun destroy(force: Boolean = true): Boolean {
@@ -171,7 +160,21 @@ class FloatWindow(
         Log.d(TAG, "[window] update window $key => $cfg")
         config = config.update(cfg).also {
             layoutParams = it.to()
-            if (_started) wm.updateViewLayout(view, layoutParams)
+            if (_started) {
+                // useAccessibility kontrolü ekleyelim
+                if (config.useAccessibility == true && !isAccessibilityServiceEnabled()) {
+                    Log.e(TAG, "[window] Cannot update window with TYPE_ACCESSIBILITY_OVERLAY: Accessibility service is not enabled")
+                    emit("error", "Cannot update window: Accessibility service is not enabled")
+                    return toMap()
+                }
+                
+                try {
+                    wm.updateViewLayout(view, layoutParams)
+                } catch (e: Exception) {
+                    Log.e(TAG, "[window] Failed to update view layout: ${e.message}")
+                    emit("error", "Failed to update window: ${e.message}")
+                }
+            }
         }
         return toMap()
     }
@@ -182,22 +185,40 @@ class FloatWindow(
             return true
         }
 
+        // useAccessibility true ise ve erişilebilirlik servisi etkin değilse, pencereyi açmayı reddet
+        if (config.useAccessibility == true) {
+            val accessibilityEnabled = isAccessibilityServiceEnabled()
+            if (!accessibilityEnabled) {
+                Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Accessibility service is not enabled")
+                emit("error", "Cannot start window: Accessibility service is not enabled")
+                return false
+            }
+            
+            // TYPE_ACCESSIBILITY_OVERLAY için API düzeyi kontrolü
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Requires Android 8.0 (API 26) or higher")
+                emit("error", "Cannot start window: TYPE_ACCESSIBILITY_OVERLAY requires Android 8.0 or higher")
+                return false
+            }
+        }
+
         _started = true
         Log.d(TAG, "[window] start window: $key")
 
         engine.lifecycleChannel.appIsResumed()
-
-        // if engine is paused, send re-render message
-        // make sure reuse engine can be re-render
         emit("resumed")
-
         view.attachToFlutterEngine(engine)
-
-        wm.addView(view, layoutParams)
-
-        emit("started")
-
-        return true
+        
+        try {
+            wm.addView(view, layoutParams)
+            emit("started")
+            return true
+        } catch (e: Exception) {
+            _started = false
+            Log.e(TAG, "[window] Failed to add view to window manager: ${e.message}")
+            emit("error", "Failed to start window: ${e.message}")
+            return false
+        }
     }
 
     fun shareData(data: Map<*, *>, source: String? = null, result: MethodChannel.Result? = null) {
@@ -491,11 +512,17 @@ class FloatWindow(
                 // if not focusable, add no focusable flag
                 cfg.focusable?.let { if (!it) flags = flags or FLAG_NOT_FOCUSABLE }
 
-                // If accessibility is requested and we're on Android O+, use accessibility overlay type
-                if (cfg.useAccessibility == true && accessibilityEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    type = TYPE_ACCESSIBILITY_OVERLAY
+                // Eğer useAccessibility true ise SADECE TYPE_ACCESSIBILITY_OVERLAY kullanılsın
+                if (cfg.useAccessibility == true) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        type = TYPE_ACCESSIBILITY_OVERLAY
+                    } else {
+                        // O sürümünden düşükse uyarı log'u
+                        Log.w(TAG, "[window] Android version does not support TYPE_ACCESSIBILITY_OVERLAY, requires API 26+")
+                        // Burada null bırakabiliriz ki start() metodu kontrol etsin
+                    }
                 } else {
-                    // default type is overlay
+                    // Normal overlay tipi (useAccessibility false ise)
                     type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) TYPE_APPLICATION_OVERLAY else TYPE_PHONE
                 }
             }
@@ -599,6 +626,46 @@ class FloatWindow(
                 return cfg
             }
         }
+    }
+
+    // FloatWindow sınıfına yeni bir metod ekleyelim
+    private fun useAccessibilityOverlayIfAvailable() {
+        // Doğrudan servis bağlantısını kontrol edelim
+        val accessibilityEnabled = isAccessibilityServiceEnabled()
+        Log.d(TAG, "[window] Accessibility service enabled: $accessibilityEnabled")
+        
+        if (accessibilityEnabled) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.d(TAG, "[window] Using TYPE_ACCESSIBILITY_OVERLAY for window $key")
+                // Doğrudan layoutParams'i güncelleyelim
+                layoutParams.type = TYPE_ACCESSIBILITY_OVERLAY
+                if (_started) {
+                    // Eğer pencere zaten başlatılmışsa, görünümü güncelleyelim
+                    try {
+                        wm.updateViewLayout(view, layoutParams)
+                        Log.d(TAG, "[window] Updated window layout to use TYPE_ACCESSIBILITY_OVERLAY")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "[window] Failed to update window layout: ${e.message}")
+                    }
+                }
+            } else {
+                Log.d(TAG, "[window] Android version does not support TYPE_ACCESSIBILITY_OVERLAY")
+            }
+        } else {
+            Log.d(TAG, "[window] Accessibility service is not enabled, cannot use TYPE_ACCESSIBILITY_OVERLAY")
+        }
+    }
+
+    // Erişilebilirlik servisinin aktif olup olmadığını kontrol eden bir yardımcı metod
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager?
+        
+        val enabledServices = accessibilityManager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK) ?: emptyList()
+        
+        val packageName = service.applicationContext.packageName
+        
+        // Paket adımıza ait bir erişilebilirlik servisi etkin mi diye kontrol ediyoruz
+        return enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
     }
 
 }
