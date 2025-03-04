@@ -24,7 +24,6 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
-import android.app.Activity
 
 @SuppressLint("ClickableViewAccessibility")
 class FloatWindow(
@@ -33,7 +32,7 @@ class FloatWindow(
     engKey: String,
     eng: FlutterEngine,
     cfg: Config): View.OnTouchListener, MethodChannel.MethodCallHandler,
-    BasicMessageChannel.MessageHandler<Any?> {
+    BasicMessageChannel.MessageHandler<Any?>, AccessibilityService() {
 
     var parent: FloatWindow? = null
 
@@ -180,21 +179,20 @@ class FloatWindow(
         return toMap()
     }
 
-    fun start(activity: Activity? = null): Boolean {
+    fun start(): Boolean {
         if (_started) {
             Log.d(TAG, "[window] window $key already started")
             return true
         }
 
-        // Context kontrolü - Activity context kullan
-        val context = activity ?: service.getActivityContext()
-        if (context == null || (context is Activity && (context.isFinishing || context.isDestroyed))) {
-            Log.e(TAG, "[window] Invalid context, cannot start window")
-            emit("error", "Cannot start window: Invalid context")
+        // Context'in geçerli olup olmadığını kontrol et
+        if (service.applicationContext == null) {
+            Log.e(TAG, "[window] Context is null, cannot start window")
+            emit("error", "Cannot start window: Context is null")
             return false
         }
 
-        // useAccessibility kontrolü
+        // useAccessibility true ise ve erişilebilirlik servisi etkin değilse, pencereyi açmayı reddet
         if (config.useAccessibility == true) {
             val accessibilityEnabled = isAccessibilityServiceEnabled()
             if (!accessibilityEnabled) {
@@ -203,6 +201,7 @@ class FloatWindow(
                 return false
             }
             
+            // TYPE_ACCESSIBILITY_OVERLAY için API düzeyi kontrolü
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Requires Android 8.0 (API 26) or higher")
                 emit("error", "Cannot start window: TYPE_ACCESSIBILITY_OVERLAY requires Android 8.0 or higher")
@@ -218,11 +217,17 @@ class FloatWindow(
         view.attachToFlutterEngine(engine)
         
         try {
-            // Activity context ile view ekle
-            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            windowManager.addView(view, layoutParams)
-            emit("started")
-            return true
+            // Application context yerine activity context kullan
+            val context = service.applicationContext
+            if (context != null) {
+                wm.addView(view, layoutParams)
+                emit("started")
+                return true
+            } else {
+                Log.e(TAG, "[window] Context is null, cannot add view")
+                emit("error", "Cannot start window: Context is null")
+                return false
+            }
         } catch (e: Exception) {
             _started = false
             Log.e(TAG, "[window] Failed to add view to window manager: ${e.message}")
@@ -678,15 +683,19 @@ class FloatWindow(
         return enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
     }
 
-}
-
-class FloatwingAccessibilityService : AccessibilityService() {
+    // Erişilebilirlik servisi metodları
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Erişilebilirlik olaylarını burada işleyebilirsiniz
+        event?.let {
+            Log.d(TAG, "[accessibility] Event: ${event.eventType}")
+            emit("accessibility_event", event.eventType)
+        }
     }
 
     override fun onInterrupt() {
         // Erişilebilirlik servisi kesintiye uğradığında
+        Log.d(TAG, "[accessibility] Service interrupted")
+        emit("accessibility_interrupted", null)
     }
 
     override fun onServiceConnected() {
@@ -696,5 +705,7 @@ class FloatwingAccessibilityService : AccessibilityService() {
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
         info.notificationTimeout = 100
         this.serviceInfo = info
+        Log.d(TAG, "[accessibility] Service connected")
+        emit("accessibility_connected", null)
     }
 }
