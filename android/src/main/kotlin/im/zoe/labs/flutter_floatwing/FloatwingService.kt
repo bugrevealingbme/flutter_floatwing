@@ -27,6 +27,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.FlutterCallbackInformation
 import org.json.JSONObject
 import java.lang.Exception
+import im.zoe.labs.flutter_floatwing.FlutterFloatwingPlugin
 
 class FloatwingService : MethodChannel.MethodCallHandler, BasicMessageChannel.MessageHandler<Any?>, Service() {
 
