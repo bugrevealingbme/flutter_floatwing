@@ -159,19 +159,15 @@ class FloatWindow(
         Log.i(TAG, "[window] destroy window: $key force: $force")
 
         // Remove accessibility callback if registered
-        val callback = accessibilityService
-        if (callback != null) {
-            callback.removeAccessibilityStateChangeListener(AccessibilityManager.AccessibilityStateChangeListener { enabled ->
-                FloatWindow.updateAccessibilityState(enabled)
-            })
-            accessibilityService = null
+        val accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        accessibilityManager.removeAccessibilityStateChangeListener { enabled ->
+            FloatWindow.updateAccessibilityState(enabled)
         }
 
         // remote from manager must be first
         if (_started) wm.removeView(view)
 
         view.detachFromFlutterEngine()
-
 
         // TODO: should we stop the engine for flutter?
         if (force) {
