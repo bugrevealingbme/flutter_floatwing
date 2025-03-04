@@ -602,3 +602,22 @@ class FloatWindow(
     }
 
 }
+
+class FloatwingAccessibilityService : AccessibilityService() {
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // Erişilebilirlik olaylarını burada işleyebilirsiniz
+    }
+
+    override fun onInterrupt() {
+        // Erişilebilirlik servisi kesintiye uğradığında
+    }
+
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        val info = serviceInfo
+        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+        info.notificationTimeout = 100
+        this.serviceInfo = info
+    }
+}
