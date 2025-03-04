@@ -32,7 +32,7 @@ class FloatWindow(
     engKey: String,
     eng: FlutterEngine,
     cfg: Config): View.OnTouchListener, MethodChannel.MethodCallHandler,
-    BasicMessageChannel.MessageHandler<Any?>, AccessibilityService() {
+    BasicMessageChannel.MessageHandler<Any?> {
 
     var parent: FloatWindow? = null
 
@@ -63,23 +63,53 @@ class FloatWindow(
 
     var _started = false
 
-    private var accessibilityManager: AccessibilityManager? = null
-    private var accessibilityEnabled = false
-    private var accessibilityCallback: AccessibilityManager.AccessibilityStateChangeListener? = null
+    // Erişilebilirlik servisi referansı
+    private var accessibilityService: AccessibilityService? = null
+
+    // Erişilebilirlik servisini başlat
+    fun startAccessibilityService(service: AccessibilityService) {
+        accessibilityService = service
+        // Erişilebilirlik servisi başlatıldığında yapılacak işlemler
+        service.onServiceConnected()
+    }
+
+    // Erişilebilirlik servisini durdur
+    fun stopAccessibilityService() {
+        accessibilityService = null
+    }
+
+    // Erişilebilirlik servisinin aktif olup olmadığını kontrol et
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager?
+        val enabledServices = accessibilityManager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK) ?: emptyList()
+        val packageName = service.applicationContext.packageName
+        return enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
+    }
+
+    // Erişilebilirlik olaylarını işle
+    fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        event?.let {
+            Log.d(TAG, "[accessibility] Event: ${event.eventType}")
+            emit("accessibility_event", event.eventType)
+        }
+    }
+
+    // Erişilebilirlik servisi kesintiye uğradığında
+    fun onInterrupt() {
+        Log.d(TAG, "[accessibility] Service interrupted")
+        emit("accessibility_interrupted", null)
+    }
 
     fun init(): FloatWindow {
         layoutParams = config.to()
 
-        // Initialize accessibility manager
-        accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        
+        view.setBackgroundColor(Color.TRANSPARENT)
+        view.fitsSystemWindows = true
+
         config.focusable?.let{
             view.isFocusable = it
             view.isFocusableInTouchMode = it
         }
-
-        view.setBackgroundColor(Color.TRANSPARENT)
-        view.fitsSystemWindows = true
 
         config.visible?.let{ setVisible(it) }
 
@@ -89,7 +119,7 @@ class FloatWindow(
         config.useAccessibility?.let {
             if (it) {
                 setupAccessibility()
-                FloatWindow.updateAccessibilityState(accessibilityEnabled)
+                FloatWindow.updateAccessibilityState(isAccessibilityServiceEnabled())
             }
         }
 
@@ -101,8 +131,7 @@ class FloatWindow(
     private fun setupAccessibility() {
         // Register for accessibility state changes
         val callback = AccessibilityManager.AccessibilityStateChangeListener { enabled ->
-            accessibilityEnabled = enabled
-            emit("accessibility_state_changed", enabled)
+            FloatWindow.updateAccessibilityState(enabled)
             
             if (enabled) {
                 // Erişilebilirlik etkinleştirildiğinde overlay tipini güncelleyelim
@@ -110,22 +139,20 @@ class FloatWindow(
             }
         }
         
-        accessibilityCallback = callback
-        accessibilityManager?.addAccessibilityStateChangeListener(callback)
-        accessibilityEnabled = accessibilityManager?.isEnabled ?: false
-
-        // Mevcut durumu hemen kontrol edelim    
-        useAccessibilityOverlayIfAvailable()
+        accessibilityService?.addAccessibilityStateChangeListener(callback)
+        FloatWindow.updateAccessibilityState(isAccessibilityServiceEnabled())
     }
 
     fun destroy(force: Boolean = true): Boolean {
         Log.i(TAG, "[window] destroy window: $key force: $force")
 
         // Remove accessibility callback if registered
-        val callback = accessibilityCallback
+        val callback = accessibilityService
         if (callback != null) {
-            accessibilityManager?.removeAccessibilityStateChangeListener(callback)
-            accessibilityCallback = null
+            callback.removeAccessibilityStateChangeListener(AccessibilityManager.AccessibilityStateChangeListener { enabled ->
+                FloatWindow.updateAccessibilityState(enabled)
+            })
+            accessibilityService = null
         }
 
         // remote from manager must be first
@@ -670,42 +697,27 @@ class FloatWindow(
             Log.d(TAG, "[window] Accessibility service is not enabled, cannot use TYPE_ACCESSIBILITY_OVERLAY")
         }
     }
+}
 
-    // Erişilebilirlik servisinin aktif olup olmadığını kontrol eden bir yardımcı metod
-    private fun isAccessibilityServiceEnabled(): Boolean {
-        val accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager?
-        
-        val enabledServices = accessibilityManager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK) ?: emptyList()
-        
-        val packageName = service.applicationContext.packageName
-        
-        // Paket adımıza ait bir erişilebilirlik servisi etkin mi diye kontrol ediyoruz
-        return enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
+
+class FloatwingAccessibilityService : AccessibilityService() {
+
+    private var floatWindow: FloatWindow? = null
+
+    fun setFloatWindow(window: FloatWindow) {
+        this.floatWindow = window
     }
 
-    // Erişilebilirlik servisi metodları
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Erişilebilirlik olaylarını burada işleyebilirsiniz
-        event?.let {
-            Log.d(TAG, "[accessibility] Event: ${event.eventType}")
-            emit("accessibility_event", event.eventType)
-        }
+        floatWindow?.onAccessibilityEvent(event)
     }
 
     override fun onInterrupt() {
-        // Erişilebilirlik servisi kesintiye uğradığında
-        Log.d(TAG, "[accessibility] Service interrupted")
-        emit("accessibility_interrupted", null)
+        floatWindow?.onInterrupt()
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        val info = serviceInfo
-        info.eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-        info.notificationTimeout = 100
-        this.serviceInfo = info
-        Log.d(TAG, "[accessibility] Service connected")
-        emit("accessibility_connected", null)
+        floatWindow?.startAccessibilityService(this)
     }
 }
