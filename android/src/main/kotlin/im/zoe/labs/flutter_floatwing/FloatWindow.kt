@@ -24,6 +24,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
+import android.app.Activity
 
 @SuppressLint("ClickableViewAccessibility")
 class FloatWindow(
@@ -179,20 +180,21 @@ class FloatWindow(
         return toMap()
     }
 
-    fun start(): Boolean {
+    fun start(activity: Activity? = null): Boolean {
         if (_started) {
             Log.d(TAG, "[window] window $key already started")
             return true
         }
 
-        // Context'in geçerli olup olmadığını kontrol et
-        if (service.applicationContext == null) {
-            Log.e(TAG, "[window] Context is null, cannot start window")
-            emit("error", "Cannot start window: Context is null")
+        // Context kontrolü - Activity context kullan
+        val context = activity ?: service.getActivityContext()
+        if (context == null || (context is Activity && (context.isFinishing || context.isDestroyed))) {
+            Log.e(TAG, "[window] Invalid context, cannot start window")
+            emit("error", "Cannot start window: Invalid context")
             return false
         }
 
-        // useAccessibility true ise ve erişilebilirlik servisi etkin değilse, pencereyi açmayı reddet
+        // useAccessibility kontrolü
         if (config.useAccessibility == true) {
             val accessibilityEnabled = isAccessibilityServiceEnabled()
             if (!accessibilityEnabled) {
@@ -201,7 +203,6 @@ class FloatWindow(
                 return false
             }
             
-            // TYPE_ACCESSIBILITY_OVERLAY için API düzeyi kontrolü
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
                 Log.e(TAG, "[window] Cannot start window with TYPE_ACCESSIBILITY_OVERLAY: Requires Android 8.0 (API 26) or higher")
                 emit("error", "Cannot start window: TYPE_ACCESSIBILITY_OVERLAY requires Android 8.0 or higher")
@@ -217,17 +218,11 @@ class FloatWindow(
         view.attachToFlutterEngine(engine)
         
         try {
-            // Application context yerine activity context kullan
-            val context = service.applicationContext
-            if (context != null) {
-                wm.addView(view, layoutParams)
-                emit("started")
-                return true
-            } else {
-                Log.e(TAG, "[window] Context is null, cannot add view")
-                emit("error", "Cannot start window: Context is null")
-                return false
-            }
+            // Activity context ile view ekle
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            windowManager.addView(view, layoutParams)
+            emit("started")
+            return true
         } catch (e: Exception) {
             _started = false
             Log.e(TAG, "[window] Failed to add view to window manager: ${e.message}")
