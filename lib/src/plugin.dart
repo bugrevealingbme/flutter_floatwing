@@ -224,4 +224,26 @@ class FloatwingPlugin {
     // TODO:
     return this;
   }
+
+  /// Check if the accessibility service is enabled
+  Future<bool> isAccessibilityServiceEnabled() async {
+    try {
+      final result = await _channel.invokeMethod('check_accessibility_service');
+      return result ?? false;
+    } catch (e) {
+      print('Error checking accessibility service: $e');
+      return false;
+    }
+  }
+
+  /// Open accessibility settings
+  Future<bool> openAccessibilitySettings() async {
+    try {
+      final result = await _channel.invokeMethod('open_accessibility_settings');
+      return result ?? false;
+    } catch (e) {
+      print('Error opening accessibility settings: $e');
+      return false;
+    }
+  }
 }
