@@ -252,8 +252,13 @@ class FloatWindow(
         view.attachToFlutterEngine(engine)
         
         try {
-            // Application context yerine activity context kullan
-            val context = service.applicationContext
+            // Erişilebilirlik servisi kullanıldığında, accessibilityService doğrudan kullanılmalı
+            val context = if (config.useAccessibility == true && accessibilityService != null) {
+                accessibilityService!!.baseContext
+            } else {
+                service.applicationContext
+            }
+            
             if (context != null) {
                 wm.addView(view, layoutParams)
                 emit("started")
@@ -261,6 +266,7 @@ class FloatWindow(
             } else {
                 Log.e(TAG, "[window] Context is null, cannot add view")
                 emit("error", "Cannot start window: Context is null")
+                _started = false
                 return false
             }
         } catch (e: Exception) {
@@ -421,6 +427,21 @@ class FloatWindow(
     companion object {
         private const val TAG = "FloatWindow"
         private var accessibilityEnabled = false
+        private val activeWindows = mutableListOf<FloatWindow>()
+        
+        fun getActiveWindows(): List<FloatWindow> {
+            return activeWindows
+        }
+        
+        fun addActiveWindow(window: FloatWindow) {
+            if (!activeWindows.contains(window)) {
+                activeWindows.add(window)
+            }
+        }
+        
+        fun removeActiveWindow(window: FloatWindow) {
+            activeWindows.remove(window)
+        }
         
         fun shareData(channel: MethodChannel, data: Map<*, *>, source: String? = null,
                       result: MethodChannel.Result? = null): Any? {
@@ -551,29 +572,38 @@ class FloatWindow(
                 gravity = cfg.gravity ?: Gravity.TOP or Gravity.LEFT
 
                 // default flags
-                flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL
+                flags = FLAG_LAYOUT_IN_SCREEN or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_NO_LIMITS
+                
                 // if immersion add flag no limit
                 cfg.immersion?.let{ if (it) flags = flags or FLAG_LAYOUT_NO_LIMITS }
+                
                 // default we should be clickable
                 // if not clickable, add flag not touchable
                 cfg.clickable?.let{ if (!it) flags = flags or FLAG_NOT_TOUCHABLE }
+                
                 // default we should be no focusable
                 if (cfg.focusable == null) { cfg.focusable = false }
                 // if not focusable, add no focusable flag
                 cfg.focusable?.let { if (!it) flags = flags or FLAG_NOT_FOCUSABLE }
 
-                // Eğer useAccessibility true ise SADECE TYPE_ACCESSIBILITY_OVERLAY kullanılsın
+                // Eğer useAccessibility true ise TYPE_ACCESSIBILITY_OVERLAY kullanılsın
                 if (cfg.useAccessibility == true) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         type = TYPE_ACCESSIBILITY_OVERLAY
                     } else {
-                        // O sürümünden düşükse uyarı log'u
                         Log.w(TAG, "[window] Android version does not support TYPE_ACCESSIBILITY_OVERLAY, requires API 26+")
-                        // Burada null bırakabiliriz ki start() metodu kontrol etsin
+                        // Fall back to a different type for older Android versions
+                        type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
+                                  TYPE_APPLICATION_OVERLAY 
+                               else 
+                                  TYPE_PHONE
                     }
                 } else {
                     // Normal overlay tipi (useAccessibility false ise)
-                    type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) TYPE_APPLICATION_OVERLAY else TYPE_PHONE
+                    type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
+                                         TYPE_APPLICATION_OVERLAY 
+                                      else 
+                                         TYPE_PHONE
                 }
             }
         }
@@ -680,37 +710,41 @@ class FloatWindow(
 
     // FloatWindow sınıfına yeni bir metod ekleyelim
     private fun useAccessibilityOverlayIfAvailable() {
-        // Doğrudan servis bağlantısını kontrol edelim
         val accessibilityEnabled = isAccessibilityServiceEnabled()
         Log.d(TAG, "[window] Accessibility service enabled: $accessibilityEnabled")
         
-        if (accessibilityEnabled) {
+        if (accessibilityEnabled && accessibilityService != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Log.d(TAG, "[window] Using TYPE_ACCESSIBILITY_OVERLAY for window $key")
-                // Doğrudan layoutParams'i güncelleyelim
                 layoutParams.type = TYPE_ACCESSIBILITY_OVERLAY
                 if (_started) {
-                    // Eğer pencere zaten başlatılmışsa, görünümü güncelleyelim
                     try {
+                        // Mutlaka accessibilityService.windowManager kullanılmalı
+                        wm = accessibilityService!!.getSystemService(Context.WINDOW_SERVICE) as WindowManager
                         wm.updateViewLayout(view, layoutParams)
                         Log.d(TAG, "[window] Updated window layout to use TYPE_ACCESSIBILITY_OVERLAY")
                     } catch (e: Exception) {
                         Log.e(TAG, "[window] Failed to update window layout: ${e.message}")
                     }
                 }
-            } else {
-                Log.d(TAG, "[window] Android version does not support TYPE_ACCESSIBILITY_OVERLAY")
             }
-        } else {
-            Log.d(TAG, "[window] Accessibility service is not enabled, cannot use TYPE_ACCESSIBILITY_OVERLAY")
         }
     }
 }
 
 
 class FloatwingAccessibilityService : AccessibilityService() {
-
     private var floatWindow: FloatWindow? = null
+    
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        // Servis bağlandığında ilgili tüm pencereleri bilgilendir
+        FloatWindow.getActiveWindows().forEach { window ->
+            if (window.config.useAccessibility == true) {
+                window.startAccessibilityService(this)
+            }
+        }
+    }
 
     fun setFloatWindow(window: FloatWindow) {
         this.floatWindow = window
@@ -722,10 +756,5 @@ class FloatwingAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         floatWindow?.onInterrupt()
-    }
-
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        floatWindow?.startAccessibilityService(this)
     }
 }
