@@ -20,6 +20,10 @@ import io.flutter.plugin.common.BasicMessageChannel
 import io.flutter.plugin.common.JSONMessageCodec
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 
 @SuppressLint("ClickableViewAccessibility")
 class FloatWindow(
@@ -59,9 +63,16 @@ class FloatWindow(
 
     var _started = false
 
+    private var accessibilityManager: AccessibilityManager? = null
+    private var accessibilityEnabled = false
+    private var accessibilityCallback: AccessibilityManager.AccessibilityStateChangeListener? = null
+
     fun init(): FloatWindow {
         layoutParams = config.to()
 
+        // Initialize accessibility manager
+        accessibilityManager = service.applicationContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        
         config.focusable?.let{
             view.isFocusable = it
             view.isFocusableInTouchMode = it
@@ -74,12 +85,54 @@ class FloatWindow(
 
         view.setOnTouchListener(this)
 
+        // Setup accessibility if requested
+        config.useAccessibility?.let {
+            if (it) setupAccessibility()
+        }
+
         // view.attachToFlutterEngine(engine)
         return this
     }
 
+    // Setup accessibility service features
+    private fun setupAccessibility() {
+        // Register for accessibility state changes
+        accessibilityCallback = AccessibilityManager.AccessibilityStateChangeListener { enabled ->
+            accessibilityEnabled = enabled
+            emit("accessibility_state_changed", enabled)
+            
+            if (enabled) {
+                // Use TYPE_ACCESSIBILITY_OVERLAY when accessibility service is enabled
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    update(Config().apply {
+                        type = TYPE_ACCESSIBILITY_OVERLAY
+                    })
+                }
+            }
+        }
+        
+        accessibilityManager?.addAccessibilityStateChangeListener(accessibilityCallback)
+        accessibilityEnabled = accessibilityManager?.isEnabled ?: false
+        
+        // Check if we can use accessibility overlay
+        if (accessibilityEnabled) {
+            // Use accessibility overlay type when available
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                update(Config().apply {
+                    type = TYPE_ACCESSIBILITY_OVERLAY
+                })
+            }
+        }
+    }
+
     fun destroy(force: Boolean = true): Boolean {
         Log.i(TAG, "[window] destroy window: $key force: $force")
+
+        // Remove accessibility callback if registered
+        accessibilityCallback?.let {
+            accessibilityManager?.removeAccessibilityStateChangeListener(it)
+            accessibilityCallback = null
+        }
 
         // remote from manager must be first
         if (_started) wm.removeView(view)
@@ -396,6 +449,7 @@ class FloatWindow(
 
         var visible: Boolean? = null
 
+        var useAccessibility: Boolean? = null
 
         // inline fun <reified T: Any?>to(): T {
         fun to(): LayoutParams {
@@ -427,8 +481,13 @@ class FloatWindow(
                 // if not focusable, add no focusable flag
                 cfg.focusable?.let { if (!it) flags = flags or FLAG_NOT_FOCUSABLE }
 
-                // default type is overlay
-                type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) TYPE_APPLICATION_OVERLAY else TYPE_PHONE
+                // If accessibility is requested and we're on Android O+, use accessibility overlay type
+                if (cfg.useAccessibility == true && accessibilityEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    type = TYPE_ACCESSIBILITY_OVERLAY
+                } else {
+                    // default type is overlay
+                    type = cfg.type ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) TYPE_APPLICATION_OVERLAY else TYPE_PHONE
+                }
             }
         }
 
@@ -457,6 +516,8 @@ class FloatWindow(
 
             map["visible"] = visible
 
+            map["useAccessibility"] = useAccessibility
+
             return map
         }
 
@@ -481,6 +542,8 @@ class FloatWindow(
             cfg.immersion?.let { immersion = it }
 
             cfg.visible?.let { visible = it }
+
+            cfg.useAccessibility?.let { useAccessibility = it }
 
             return this
         }
@@ -520,6 +583,8 @@ class FloatWindow(
                 cfg.immersion = data["immersion"] as Boolean?
 
                 cfg.visible = data["visible"] as Boolean?
+
+                cfg.useAccessibility = data["useAccessibility"] as Boolean?
 
                 return cfg
             }
