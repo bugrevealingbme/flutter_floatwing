@@ -87,7 +87,10 @@ class FloatWindow(
 
         // Setup accessibility if requested
         config.useAccessibility?.let {
-            if (it) setupAccessibility()
+            if (it) {
+                setupAccessibility()
+                FloatWindow.updateAccessibilityState(accessibilityEnabled)
+            }
         }
 
         // view.attachToFlutterEngine(engine)
@@ -97,7 +100,7 @@ class FloatWindow(
     // Setup accessibility service features
     private fun setupAccessibility() {
         // Register for accessibility state changes
-        accessibilityCallback = AccessibilityManager.AccessibilityStateChangeListener { enabled ->
+        val callback = AccessibilityManager.AccessibilityStateChangeListener { enabled ->
             accessibilityEnabled = enabled
             emit("accessibility_state_changed", enabled)
             
@@ -111,7 +114,8 @@ class FloatWindow(
             }
         }
         
-        accessibilityManager?.addAccessibilityStateChangeListener(accessibilityCallback)
+        accessibilityCallback = callback
+        accessibilityManager?.addAccessibilityStateChangeListener(callback)
         accessibilityEnabled = accessibilityManager?.isEnabled ?: false
         
         // Check if we can use accessibility overlay
@@ -129,8 +133,9 @@ class FloatWindow(
         Log.i(TAG, "[window] destroy window: $key force: $force")
 
         // Remove accessibility callback if registered
-        accessibilityCallback?.let {
-            accessibilityManager?.removeAccessibilityStateChangeListener(it)
+        val callback = accessibilityCallback
+        if (callback != null) {
+            accessibilityManager?.removeAccessibilityStateChangeListener(callback)
             accessibilityCallback = null
         }
 
@@ -344,7 +349,8 @@ class FloatWindow(
 
     companion object {
         private const val TAG = "FloatWindow"
-
+        private var accessibilityEnabled = false
+        
         fun shareData(channel: MethodChannel, data: Map<*, *>, source: String? = null,
                       result: MethodChannel.Result? = null): Any? {
             // id is the data comes from
@@ -355,6 +361,10 @@ class FloatWindow(
             channel.invokeMethod("data.share", map, result)
             // how to get data back
             return null
+        }
+        
+        fun updateAccessibilityState(enabled: Boolean) {
+            accessibilityEnabled = enabled
         }
     }
 
