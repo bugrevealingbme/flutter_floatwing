@@ -361,6 +361,16 @@ class FloatwingService : MethodChannel.MethodCallHandler, BasicMessageChannel.Me
         return FLUTTER_ENGINE_KEY + this
     }
 
+    fun getActivityContext(): Activity? {
+        return try {
+            // Flutter'in current activity'sini al
+            flutterEngine?.activityIntegration?.activity
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get activity context: ${e.message}")
+            null
+        }
+    }
+
     companion object {
         @JvmStatic
         private val TAG = "FloatwingService"
