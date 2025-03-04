@@ -21,6 +21,8 @@ import io.flutter.plugin.common.PluginRegistry
 import io.flutter.plugin.common.PluginRegistry.Registrar
 import org.json.JSONObject
 import java.lang.Exception
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.AccessibilityManager
 
 /** FlutterFloatwingPlugin */
 class FlutterFloatwingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, PluginRegistry.ActivityResultListener {
@@ -167,6 +169,23 @@ class FlutterFloatwingPlugin: FlutterPlugin, ActivityAware, MethodCallHandler, P
       "window.sync" -> {
         Log.d(TAG, "[plugin] fake window.sync")
         return result.success(null)
+      }
+      "check_accessibility_service" -> {
+        val accessibilityManager = mContext.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabledServices = accessibilityManager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        val packageName = mContext.packageName
+        val isEnabled = enabledServices.any { it.resolveInfo.serviceInfo.packageName == packageName }
+        result.success(isEnabled)
+      }
+      "open_accessibility_settings" -> {
+        try {
+          val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+          mContext.startActivity(intent)
+          result.success(true)
+        } catch (e: Exception) {
+          result.success(false)
+        }
       }
       else -> {
         Log.d(TAG, "[plugin] method ${call.method} not implement")
