@@ -24,6 +24,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
+import android.content.Intent
 
 @SuppressLint("ClickableViewAccessibility")
 class FloatWindow(
@@ -120,6 +121,16 @@ class FloatWindow(
             if (it) {
                 setupAccessibility()
                 FloatWindow.updateAccessibilityState(isAccessibilityServiceEnabled())
+            }
+        }
+
+        // Erişilebilirlik servisini başlat
+        if (config.useAccessibility == true) {
+            val intent = Intent(service.applicationContext, FloatwingAccessibilityService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                service.startForegroundService(intent)
+            } else {
+                service.startService(intent)
             }
         }
 
