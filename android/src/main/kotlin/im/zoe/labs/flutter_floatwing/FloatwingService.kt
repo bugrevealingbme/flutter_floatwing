@@ -14,6 +14,7 @@ import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import im.zoe.labs.flutter_floatwing.FlutterFloatwingPlugin
 import im.zoe.labs.flutter_floatwing.Utils.Companion.toMap
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,7 +28,6 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.FlutterCallbackInformation
 import org.json.JSONObject
 import java.lang.Exception
-import im.zoe.labs.flutter_floatwing.FlutterFloatwingPlugin
 
 class FloatwingService : MethodChannel.MethodCallHandler, BasicMessageChannel.MessageHandler<Any?>, Service() {
 
@@ -360,6 +360,13 @@ class FloatwingService : MethodChannel.MethodCallHandler, BasicMessageChannel.Me
 
     private fun String.flutterKey(): String {
         return FLUTTER_ENGINE_KEY + this
+    }
+
+    fun startAccessibilityServiceIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val accessibilityIntent = Intent(applicationContext, FloatwingAccessibilityService::class.java)
+            startService(accessibilityIntent)
+        }
     }
 
     companion object {
